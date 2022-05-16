@@ -1,0 +1,4 @@
+*.ppm
+*.bin
+.DS_Store
+.vscode
