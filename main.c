@@ -1,3 +1,11 @@
+/*
+	Uogólnienie outputu do sumy całości inputu
+	Opcjonalnie spróbować output[][]
+	gdzie pojedyncza komórka sprawdza BIAS
+	a pózniej odpowiednio się dostosowuje
+*/
+
+
 #include <stdio.h>
 #include <assert.h>
 #include <errno.h>
@@ -5,11 +13,13 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <float.h>
 
 #define WIDTH 51
 #define HEIGHT 51
 #define SCALE 25
-#define SAMPLE_SIZE 10
+#define SAMPLE_SIZE 500
+#define BIAS 10.0
 
 #define randnum(min, max) \
 	((rand() % (int) (((max) + 1) - (min))) + (min))
@@ -61,6 +71,17 @@ void fill_circle(Layer layer, int x, int y, int r, int value)
 
 void layer_to_ppm(Layer layer, const char *file_path)
 {
+	float min = FLT_MAX;
+	float max = FLT_MIN;
+
+	int p, q;
+	for (p = 0; p < HEIGHT-1; ++p) {
+		for (q = 0; q < WIDTH-1; ++q) {
+			if (layer[p][q] < min) min = layer[p][q];
+			if (layer[p][q] > max) max = layer[p][q];
+		}
+	}
+
 	FILE *f = fopen(file_path, "wb");
 	if (f == NULL) {
 		fprintf(stderr, "ERROR: could not open the file %s: %m\n", file_path);
@@ -72,10 +93,10 @@ void layer_to_ppm(Layer layer, const char *file_path)
 	int i, j;
 	for (i = 0; i < HEIGHT*SCALE; ++i) {
 		for (j = 0; j < WIDTH*SCALE; ++j) {
-			float s = layer[i/SCALE][j/SCALE];
+			float s = (layer[i/SCALE][j/SCALE]-min)/(max-min);
 			char pixel[3] = {
+				(char) floorf(255*(1.0f-s)),
 				(char) floorf(255*s),
-				0,
 				0
 			};
 
@@ -119,9 +140,24 @@ float forward(Layer input,Layer weight)
 	return output;
 }
 
-void func(Layer input, Layer weight)
+void add_weight_adjust(Layer input, Layer weight)
 {
-	
+	int i, j;
+	for (i = 0; i < HEIGHT; ++i) {
+		for (j = 0; j < WIDTH; ++j) {
+			weight[i][j] += input[i][j];
+		}
+	}
+}
+
+void sub_weight_adjust(Layer input, Layer weight)
+{
+	int i, j;
+	for (i = 0; i < HEIGHT; ++i) {
+		for (j = 0; j < WIDTH; ++j) {
+			weight[i][j] -= input[i][j];
+		}
+	}
 }
 
 void random_rect(Layer layer)
@@ -151,30 +187,44 @@ void random_circle(Layer layer)
 	fill_circle(layer, x, y, r, 1);
 }
 
+int train(Layer input, Layer weight)
+{
+	int adjusted = 0;
+	int i;
+	for (i = 0; i < SAMPLE_SIZE; ++i) {
+		random_rect(input);
+		if (forward(input,weight) > BIAS) {
+			sub_weight_adjust(input, weight);
+			++adjusted;
+		}
+		random_circle(input);
+		if (forward(input,weight) < BIAS) {
+			add_weight_adjust(input, weight);
+			++adjusted;
+		}
+	}
+	return adjusted;
+}
+
 Layer input;
 Layer weight;
 
-#define PREFIX "rect"
 
 int main(int argc, char const *argv[])
 {
-	srand(time(NULL));
-
+	int curr;
+	int index = 0;
 	char file_path[256];
+	do {
+		srand(69);
+		curr = train(input, weight);
+		printf("Poprawek: %d\n", curr);
+		snprintf(file_path, sizeof(file_path), "weights-%02d.ppm", index);
+		layer_to_ppm(weight, file_path);
+		++index;
+	} while (curr != 0);
 
-	int i;
-	for (i = 0; i < SAMPLE_SIZE; ++i) {
-		printf("[INFO] generating "PREFIX" %d\n", i);
-
-
-		random_rect(input);
-
-
-		snprintf(file_path, sizeof(file_path), PREFIX"-%02d.bin", i);
-		save_layer(input, file_path);
-		snprintf(file_path, sizeof(file_path), PREFIX"-%02d.ppm", i);
-		layer_to_ppm(input, file_path);
-	}
+	layer_to_ppm(weight, "weight.ppm");
 
 	return 0;
 }
